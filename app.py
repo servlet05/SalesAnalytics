@@ -1,128 +1,234 @@
 """
-SALES ANALYTICS - VERSIÓN CON GRÁFICAS
-Plotly funcionando 100%
+Sales Analytics Pro - Versión Corregida
+=======================================
+Aplicación web para análisis de ventas
 """
 
-from flask import Flask, request, render_template_string, redirect, url_for, flash
+from flask import Flask, request, render_template_string, redirect, url_for, session, flash
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import secrets
 from datetime import datetime
+import os
 import numpy as np
 import io
-import traceback
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(16)
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
 
 # ============================================
-# HTML TEMPLATES
+# SPLASH SCREEN
+# ============================================
+SPLASH_HTML = '''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sales Analytics Pro</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+        .splash {
+            text-align: center;
+            animation: fadeIn 0.8s ease forwards;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        h1 { font-size: 48px; margin-bottom: 16px; }
+        .progress {
+            width: 200px;
+            height: 4px;
+            background: rgba(255,255,255,0.2);
+            margin: 30px auto;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 100%;
+            background: white;
+            animation: progress 2s linear forwards;
+        }
+        @keyframes progress {
+            from { width: 0%; }
+            to { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="splash">
+        <h1>📊 SALES ANALYTICS PRO</h1>
+        <p style="font-size: 20px; opacity: 0.9;">Análisis inteligente de ventas</p>
+        <div class="progress">
+            <div class="progress-bar"></div>
+        </div>
+        <p style="margin-top: 20px;">inicializando...</p>
+    </div>
+    <script>
+        setTimeout(() => { window.location.href = "/main"; }, 2000);
+    </script>
+</body>
+</html>
+'''
+
+# ============================================
+# PÁGINA PRINCIPAL
 # ============================================
 INDEX_HTML = '''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Sales Analytics</title>
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <title>Sales Analytics Pro - Cargar Archivo</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            margin: 0;
+            padding: 20px;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 20px;
         }
         .container {
+            max-width: 600px;
+            width: 100%;
             background: white;
             border-radius: 20px;
             padding: 40px;
-            max-width: 600px;
-            width: 100%;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
         }
         h1 {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: #333;
             margin-bottom: 10px;
-            font-size: 36px;
+            font-size: 32px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
         }
         .upload-area {
             border: 2px dashed #667eea;
-            border-radius: 15px;
+            border-radius: 10px;
             padding: 40px;
             text-align: center;
-            margin: 30px 0;
+            background: #f8f9fa;
             cursor: pointer;
             transition: all 0.3s;
         }
         .upload-area:hover {
-            background: #f8f9fa;
             border-color: #764ba2;
+            background: #f3f0ff;
         }
-        .btn {
+        .upload-icon {
+            font-size: 48px;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        .file-input {
+            display: none;
+        }
+        .file-label {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            border: none;
             padding: 12px 30px;
             border-radius: 25px;
-            font-size: 16px;
             cursor: pointer;
-            transition: all 0.3s;
+            display: inline-block;
+            margin-top: 20px;
+            border: none;
+            font-size: 16px;
         }
-        .btn:hover { transform: scale(1.05); }
+        .formats {
+            margin-top: 20px;
+            color: #999;
+            font-size: 14px;
+        }
+        .loading {
+            display: none;
+            margin-top: 20px;
+            color: #667eea;
+        }
         .error {
             background: #ff4444;
             color: white;
             padding: 15px;
             border-radius: 10px;
             margin-bottom: 20px;
+            display: none;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📊 Sales Analytics</h1>
-        <p style="color: #666;">Sube tu archivo de ventas (CSV o Excel)</p>
+        <h1>📈 Sales Analytics Pro</h1>
+        <p class="subtitle">Sube tu archivo de ventas para análisis instantáneo</p>
         
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                    <div class="error">{{ message }}</div>
+                    <div class="error" style="display: block; background: {{ '#ff4444' if category == 'error' else '#00C851' }};">
+                        {{ message }}
+                    </div>
                 {% endfor %}
             {% endif %}
         {% endwith %}
         
         <form method="post" enctype="multipart/form-data" action="/upload" id="uploadForm">
             <div class="upload-area" onclick="document.getElementById('file').click()">
-                <div style="font-size: 48px; margin-bottom: 10px;">📁</div>
-                <p style="color: #667eea; font-weight: bold;">Haz clic para seleccionar archivo</p>
-                <p style="color: #999; font-size: 14px; margin-top: 10px;">CSV, Excel (XLSX, XLS)</p>
-                <input type="file" name="file" id="file" accept=".csv,.xlsx,.xls" style="display: none;" required>
+                <div class="upload-icon">📁</div>
+                <p style="color: #333;">Arrastra tu archivo o haz clic aquí</p>
+                <input type="file" name="file" id="file" class="file-input" accept=".csv,.xlsx,.xls,.json" required>
+                <label for="file" class="file-label">Seleccionar archivo</label>
+                <div class="formats">
+                    Formatos soportados: CSV, Excel, JSON
+                </div>
             </div>
-            <button type="submit" class="btn">Procesar Archivo</button>
+            <div class="loading" id="loading">
+                ⚙️ Procesando archivo...
+            </div>
         </form>
         
-        <p style="text-align: center; margin-top: 20px;">
-            <a href="/sample" style="color: #667eea; text-decoration: none;">📊 Usar datos de ejemplo</a>
-        </p>
+        <div style="margin-top: 30px; text-align: center; color: #666;">
+            <p style="font-size: 14px;">
+                <a href="/sample" style="color: #667eea; text-decoration: none;">📊 Probar con datos de ejemplo</a>
+            </p>
+        </div>
     </div>
     
     <script>
         document.getElementById('file').addEventListener('change', function() {
-            document.getElementById('uploadForm').submit();
+            if (this.files.length > 0) {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('uploadForm').submit();
+            }
         });
     </script>
 </body>
 </html>
 '''
 
+# ============================================
+# DASHBOARD TEMPLATE
+# ============================================
 DASHBOARD_HTML = '''
 <!DOCTYPE html>
 <html>
@@ -132,17 +238,20 @@ DASHBOARD_HTML = '''
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f8f9fa;
+            background: #f5f5f5;
+            margin: 0;
             padding: 20px;
         }
-        .container { max-width: 1400px; margin: 0 auto; }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
         .header {
             background: white;
-            border-radius: 15px;
             padding: 20px 30px;
+            border-radius: 15px;
             margin-bottom: 20px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.05);
             display: flex;
@@ -156,6 +265,13 @@ DASHBOARD_HTML = '''
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
+        .file-info {
+            background: #f8f9fa;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            color: #666;
+        }
         .btn {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -163,12 +279,13 @@ DASHBOARD_HTML = '''
             border-radius: 25px;
             text-decoration: none;
             font-size: 14px;
+            margin-left: 15px;
         }
         .metrics {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 20px;
-            margin-bottom: 20px;
+            margin-bottom: 30px;
         }
         .metric-card {
             background: white;
@@ -187,10 +304,15 @@ DASHBOARD_HTML = '''
             font-weight: bold;
             color: #333;
         }
+        .metric-sub {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
         .menu {
             background: white;
+            padding: 20px;
             border-radius: 15px;
-            padding: 15px;
             margin-bottom: 20px;
             display: flex;
             flex-wrap: wrap;
@@ -198,7 +320,7 @@ DASHBOARD_HTML = '''
         }
         .menu-item {
             padding: 10px 20px;
-            border-radius: 25px;
+            border-radius: 20px;
             text-decoration: none;
             color: #666;
             background: #f8f9fa;
@@ -210,10 +332,10 @@ DASHBOARD_HTML = '''
         }
         .viz-container {
             background: white;
-            border-radius: 15px;
             padding: 30px;
-            margin-bottom: 20px;
+            border-radius: 15px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            margin-bottom: 20px;
         }
         .viz-title {
             font-size: 20px;
@@ -222,17 +344,12 @@ DASHBOARD_HTML = '''
             padding-bottom: 15px;
             border-bottom: 1px solid #eee;
         }
-        .viz-content {
-            width: 100%;
-            min-height: 500px;
-        }
         .table-wrapper {
             overflow-x: auto;
         }
         table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 14px;
         }
         th {
             background: #f8f9fa;
@@ -249,16 +366,18 @@ DASHBOARD_HTML = '''
             color: #999;
             font-size: 12px;
             margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <span class="brand">📊 SALES ANALYTICS</span>
+            <span class="brand">📊 SALES ANALYTICS PRO</span>
             <div>
-                <span style="margin-right: 15px; color: #666;">{{ filename }} · {{ rows }} registros</span>
-                <a href="/main" class="btn">+ Nuevo análisis</a>
+                <span class="file-info">{{ filename }} · {{ rows }} registros</span>
+                <a href="/main" class="btn">Nuevo análisis</a>
             </div>
         </div>
         
@@ -267,7 +386,9 @@ DASHBOARD_HTML = '''
             <div class="metric-card">
                 <div class="metric-label">{{ metric.label }}</div>
                 <div class="metric-value">{{ metric.value }}</div>
-                <div style="color: #666; font-size: 12px; margin-top: 5px;">{{ metric.sub }}</div>
+                {% if metric.sub %}
+                <div class="metric-sub">{{ metric.sub }}</div>
+                {% endif %}
             </div>
             {% endfor %}
         </div>
@@ -276,7 +397,9 @@ DASHBOARD_HTML = '''
             <a href="/dashboard/{{ session_id }}/resumen" class="menu-item {% if viz == 'resumen' %}active{% endif %}">📊 Dashboard</a>
             <a href="/dashboard/{{ session_id }}/ventas_tiempo" class="menu-item {% if viz == 'ventas_tiempo' %}active{% endif %}">📈 Ventas por Tiempo</a>
             <a href="/dashboard/{{ session_id }}/top_productos" class="menu-item {% if viz == 'top_productos' %}active{% endif %}">🏆 Top Productos</a>
-            <a href="/dashboard/{{ session_id }}/ventas_region" class="menu-item {% if viz == 'ventas_region' %}active{% endif %}">🌍 Ventas por Región</a>
+            <a href="/dashboard/{{ session_id }}/ventas_categoria" class="menu-item {% if viz == 'ventas_categoria' %}active{% endif %}">📦 Por Categoría</a>
+            <a href="/dashboard/{{ session_id }}/ventas_region" class="menu-item {% if viz == 'ventas_region' %}active{% endif %}">🌍 Por Región</a>
+            <a href="/dashboard/{{ session_id }}/clientes" class="menu-item {% if viz == 'clientes' %}active{% endif %}">👥 Clientes</a>
             <a href="/dashboard/{{ session_id }}/datos" class="menu-item {% if viz == 'datos' %}active{% endif %}">📋 Ver Datos</a>
         </div>
         
@@ -288,7 +411,7 @@ DASHBOARD_HTML = '''
         </div>
         
         <div class="footer">
-            Sales Analytics · {{ timestamp }}
+            Sales Analytics Pro · {{ timestamp }}
         </div>
     </div>
 </body>
@@ -296,7 +419,7 @@ DASHBOARD_HTML = '''
 '''
 
 # ============================================
-# ALMACENAMIENTO
+# ALMACENAMIENTO EN MEMORIA
 # ============================================
 sessions = {}
 
@@ -304,126 +427,138 @@ sessions = {}
 # FUNCIONES DE ANÁLISIS
 # ============================================
 
-def detectar_columnas(df):
-    """Detecta columnas importantes"""
+def detectar_columnas_ventas(df):
+    """Detecta columnas importantes en el DataFrame"""
     cols = {
         'ventas': None,
         'fecha': None,
         'producto': None,
-        'region': None
+        'cliente': None,
+        'region': None,
+        'cantidad': None
     }
     
-    # Buscar ventas
+    # Buscar columna de ventas
     for col in df.columns:
         col_lower = str(col).lower()
-        if any(x in col_lower for x in ['venta', 'sales', 'total', 'monto', 'price', 'precio', 'revenue']):
+        if any(x in col_lower for x in ['venta', 'sales', 'total', 'monto', 'amount', 'price', 'precio', 'revenue']):
             cols['ventas'] = col
             break
     
+    # Si no encuentra, tomar la primera columna numérica
     if not cols['ventas']:
         numeric_cols = df.select_dtypes(include=[np.number]).columns
         if len(numeric_cols) > 0:
             cols['ventas'] = numeric_cols[0]
     
-    # Buscar fecha
+    # Buscar columna de fecha
     for col in df.columns:
         col_lower = str(col).lower()
-        if any(x in col_lower for x in ['fecha', 'date', 'tiempo', 'time']):
+        if any(x in col_lower for x in ['fecha', 'date', 'tiempo', 'time', 'dia', 'mes', 'year']):
             cols['fecha'] = col
             break
     
-    # Buscar producto
+    # Buscar columna de producto
     for col in df.columns:
         col_lower = str(col).lower()
-        if any(x in col_lower for x in ['producto', 'product', 'item', 'articulo']):
+        if any(x in col_lower for x in ['producto', 'product', 'item', 'articulo', 'nombre']):
             cols['producto'] = col
             break
     
-    # Buscar región
+    # Buscar columna de cliente
     for col in df.columns:
         col_lower = str(col).lower()
-        if any(x in col_lower for x in ['region', 'pais', 'country', 'ciudad', 'city']):
+        if any(x in col_lower for x in ['cliente', 'customer', 'buyer', 'comprador']):
+            cols['cliente'] = col
+            break
+    
+    # Buscar columna de región
+    for col in df.columns:
+        col_lower = str(col).lower()
+        if any(x in col_lower for x in ['region', 'pais', 'country', 'ciudad', 'city', 'estado', 'state']):
             cols['region'] = col
+            break
+    
+    # Buscar columna de cantidad
+    for col in df.columns:
+        col_lower = str(col).lower()
+        if any(x in col_lower for x in ['cantidad', 'quantity', 'qty', 'unidades']):
+            cols['cantidad'] = col
             break
     
     return cols
 
-def calcular_metricas(df, cols):
+def obtener_metricas(df, cols_detectadas):
     """Calcula métricas básicas"""
     metrics = []
     
-    # Total registros
+    # Total de registros
     metrics.append({
-        'label': '📊 Registros',
+        'label': '📊 Total Registros',
         'value': f'{len(df):,}',
         'sub': f'{len(df.columns)} columnas'
     })
     
     # Ventas totales
-    if cols['ventas'] and cols['ventas'] in df.columns:
+    if cols_detectadas['ventas']:
         try:
-            df[cols['ventas']] = pd.to_numeric(df[cols['ventas']], errors='coerce')
-            total = df[cols['ventas']].sum()
-            avg = df[cols['ventas']].mean()
+            total_ventas = df[cols_detectadas['ventas']].sum()
+            avg_ventas = df[cols_detectadas['ventas']].mean()
             metrics.append({
                 'label': '💰 Ventas Totales',
-                'value': f'${total:,.0f}' if not pd.isna(total) else '$0',
-                'sub': f'Promedio: ${avg:,.0f}' if not pd.isna(avg) else '$0'
+                'value': f'${total_ventas:,.0f}',
+                'sub': f'Promedio: ${avg_ventas:,.0f}'
             })
         except:
-            metrics.append({'label': '💰 Ventas', 'value': 'N/A', 'sub': 'Error cálculo'})
-    else:
-        metrics.append({'label': '💰 Ventas', 'value': 'N/A', 'sub': 'No detectada'})
+            pass
     
-    # Productos
-    if cols['producto'] and cols['producto'] in df.columns:
+    # Productos únicos
+    if cols_detectadas['producto']:
         try:
-            n_productos = df[cols['producto']].nunique()
+            n_productos = df[cols_detectadas['producto']].nunique()
             metrics.append({
                 'label': '🏷️ Productos',
                 'value': f'{n_productos:,}',
-                'sub': 'Únicos'
+                'sub': 'únicos'
             })
         except:
-            metrics.append({'label': '🏷️ Productos', 'value': 'N/A', 'sub': 'Error'})
-    else:
-        metrics.append({'label': '🏷️ Productos', 'value': 'N/A', 'sub': 'No detectada'})
+            pass
     
-    # Regiones
-    if cols['region'] and cols['region'] in df.columns:
+    # Clientes únicos
+    if cols_detectadas['cliente']:
         try:
-            n_regiones = df[cols['region']].nunique()
+            n_clientes = df[cols_detectadas['cliente']].nunique()
             metrics.append({
-                'label': '🌍 Regiones',
-                'value': f'{n_regiones:,}',
-                'sub': 'Ubicaciones'
+                'label': '👥 Clientes',
+                'value': f'{n_clientes:,}',
+                'sub': 'únicos'
             })
         except:
-            metrics.append({'label': '🌍 Regiones', 'value': 'N/A', 'sub': 'Error'})
-    else:
-        metrics.append({'label': '🌍 Regiones', 'value': 'N/A', 'sub': 'No detectada'})
+            pass
     
     return metrics[:4]
 
-def grafico_ventas_tiempo(df, cols):
-    """Gráfico de ventas en el tiempo"""
-    if not cols['fecha'] or not cols['ventas']:
+def generar_grafico_ventas_tiempo(df, cols_detectadas):
+    """Genera gráfico de ventas por tiempo"""
+    if not cols_detectadas['fecha'] or not cols_detectadas['ventas']:
         return None
     
     try:
         df_temp = df.copy()
-        df_temp[cols['fecha']] = pd.to_datetime(df_temp[cols['fecha']])
-        df_temp['fecha_simple'] = df_temp[cols['fecha']].dt.date
-        ventas = df_temp.groupby('fecha_simple')[cols['ventas']].sum().reset_index()
+        df_temp[cols_detectadas['fecha']] = pd.to_datetime(df_temp[cols_detectadas['fecha']])
+        df_temp['fecha_simple'] = df_temp[cols_detectadas['fecha']].dt.date
+        
+        ventas_diarias = df_temp.groupby('fecha_simple')[cols_detectadas['ventas']].sum().reset_index()
         
         fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=ventas['fecha_simple'],
-            y=ventas[cols['ventas']],
+            x=ventas_diarias['fecha_simple'],
+            y=ventas_diarias[cols_detectadas['ventas']],
             mode='lines+markers',
             line=dict(color='#667eea', width=3),
-            marker=dict(size=8)
+            marker=dict(size=6)
         ))
+        
         fig.update_layout(
             title='📈 Ventas en el Tiempo',
             xaxis_title='Fecha',
@@ -431,28 +566,30 @@ def grafico_ventas_tiempo(df, cols):
             template='plotly_white',
             height=500
         )
-        return fig.to_html(full_html=False, include_plotlyjs=False)
+        
+        return fig
     except:
         return None
 
-def grafico_top_productos(df, cols):
-    """Gráfico de top productos"""
-    if not cols['producto'] or not cols['ventas']:
+def generar_grafico_top_productos(df, cols_detectadas):
+    """Genera gráfico de top productos"""
+    if not cols_detectadas['producto'] or not cols_detectadas['ventas']:
         return None
     
     try:
-        top = df.groupby(cols['producto'])[cols['ventas']].sum().nlargest(10).reset_index()
+        top = df.groupby(cols_detectadas['producto'])[cols_detectadas['ventas']].sum().nlargest(10).reset_index()
         
         fig = go.Figure()
         fig.add_trace(go.Bar(
-            y=top[cols['producto']],
-            x=top[cols['ventas']],
+            y=top[cols_detectadas['producto']],
+            x=top[cols_detectadas['ventas']],
             orientation='h',
             marker_color='#764ba2',
-            text=top[cols['ventas']],
+            text=top[cols_detectadas['ventas']],
             texttemplate='$%{x:,.0f}',
             textposition='outside'
         ))
+        
         fig.update_layout(
             title='🏆 Top 10 Productos',
             xaxis_title='Ventas ($)',
@@ -461,29 +598,31 @@ def grafico_top_productos(df, cols):
             height=500,
             margin=dict(l=150)
         )
-        return fig.to_html(full_html=False, include_plotlyjs=False)
+        
+        return fig
     except:
         return None
 
-def grafico_ventas_region(df, cols):
-    """Gráfico de ventas por región"""
-    if not cols['region'] or not cols['ventas']:
+def generar_grafico_ventas_region(df, cols_detectadas):
+    """Genera gráfico de ventas por región"""
+    if not cols_detectadas['region'] or not cols_detectadas['ventas']:
         return None
     
     try:
-        regiones = df.groupby(cols['region'])[cols['ventas']].sum().reset_index()
-        regiones = regiones.sort_values(cols['ventas'], ascending=True)
+        regiones = df.groupby(cols_detectadas['region'])[cols_detectadas['ventas']].sum().reset_index()
+        regiones = regiones.sort_values(cols_detectadas['ventas'], ascending=True)
         
         fig = go.Figure()
         fig.add_trace(go.Bar(
-            y=regiones[cols['region']],
-            x=regiones[cols['ventas']],
+            y=regiones[cols_detectadas['region']],
+            x=regiones[cols_detectadas['ventas']],
             orientation='h',
             marker_color='#f39c12',
-            text=regiones[cols['ventas']],
+            text=regiones[cols_detectadas['ventas']],
             texttemplate='$%{x:,.0f}',
             textposition='outside'
         ))
+        
         fig.update_layout(
             title='🌍 Ventas por Región',
             xaxis_title='Ventas ($)',
@@ -492,17 +631,105 @@ def grafico_ventas_region(df, cols):
             height=500,
             margin=dict(l=150)
         )
-        return fig.to_html(full_html=False, include_plotlyjs=False)
+        
+        return fig
     except:
         return None
+
+def generar_grafico_top_clientes(df, cols_detectadas):
+    """Genera gráfico de top clientes"""
+    if not cols_detectadas['cliente'] or not cols_detectadas['ventas']:
+        return None
+    
+    try:
+        top = df.groupby(cols_detectadas['cliente'])[cols_detectadas['ventas']].sum().nlargest(10).reset_index()
+        
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=top[cols_detectadas['cliente']].astype(str),
+            y=top[cols_detectadas['ventas']],
+            marker_color='#2ecc71',
+            text=top[cols_detectadas['ventas']],
+            texttemplate='$%{y:,.0f}',
+            textposition='outside'
+        ))
+        
+        fig.update_layout(
+            title='👥 Top 10 Clientes',
+            xaxis_title='Cliente',
+            yaxis_title='Ventas ($)',
+            template='plotly_white',
+            height=500,
+            xaxis_tickangle=-45
+        )
+        
+        return fig
+    except:
+        return None
+
+def generar_dashboard_resumen(df, cols_detectadas):
+    """Genera dashboard resumen"""
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=('Distribución de Ventas', 'Top Productos', 'Ventas por Región', 'Top Clientes'),
+        specs=[[{'type': 'pie'}, {'type': 'bar'}],
+               [{'type': 'bar'}, {'type': 'bar'}]]
+    )
+    
+    # Gráfico 1: Distribución (si hay categorías)
+    if cols_detectadas['producto'] and cols_detectadas['ventas']:
+        try:
+            dist = df.groupby(cols_detectadas['producto'])[cols_detectadas['ventas']].sum().nlargest(5)
+            fig.add_trace(
+                go.Pie(labels=dist.index, values=dist.values, hole=0.4),
+                row=1, col=1
+            )
+        except:
+            pass
+    
+    # Gráfico 2: Top productos
+    if cols_detectadas['producto'] and cols_detectadas['ventas']:
+        try:
+            top = df.groupby(cols_detectadas['producto'])[cols_detectadas['ventas']].sum().nlargest(5)
+            fig.add_trace(
+                go.Bar(x=top.values, y=top.index, orientation='h', marker_color='#764ba2'),
+                row=1, col=2
+            )
+        except:
+            pass
+    
+    # Gráfico 3: Ventas por región
+    if cols_detectadas['region'] and cols_detectadas['ventas']:
+        try:
+            region = df.groupby(cols_detectadas['region'])[cols_detectadas['ventas']].sum().nlargest(5)
+            fig.add_trace(
+                go.Bar(x=region.index, y=region.values, marker_color='#f39c12'),
+                row=2, col=1
+            )
+        except:
+            pass
+    
+    # Gráfico 4: Top clientes
+    if cols_detectadas['cliente'] and cols_detectadas['ventas']:
+        try:
+            clientes = df.groupby(cols_detectadas['cliente'])[cols_detectadas['ventas']].sum().nlargest(5)
+            fig.add_trace(
+                go.Bar(x=clientes.index.astype(str), y=clientes.values, marker_color='#2ecc71'),
+                row=2, col=2
+            )
+        except:
+            pass
+    
+    fig.update_layout(height=700, template='plotly_white', showlegend=False)
+    return fig
 
 # ============================================
 # RUTAS
 # ============================================
 
 @app.route('/')
-def index():
-    return redirect(url_for('main'))
+def splash():
+    return render_template_string(SPLASH_HTML)
 
 @app.route('/main')
 def main():
@@ -510,78 +737,91 @@ def main():
 
 @app.route('/sample')
 def sample():
+    """Carga datos de ejemplo"""
     try:
-        # Datos de ejemplo
+        # Crear datos de ejemplo
+        np.random.seed(42)
+        n = 100
+        
         df = pd.DataFrame({
-            'Fecha': ['2024-01-01', '2024-01-02', '2024-01-03', '2024-01-04', '2024-01-05'],
-            'Producto': ['Laptop', 'Mouse', 'Teclado', 'Monitor', 'Laptop'],
-            'Ventas': [1200, 25, 80, 350, 1200],
-            'Región': ['Norte', 'Sur', 'Norte', 'Este', 'Oeste']
+            'Fecha': pd.date_range(start='2024-01-01', periods=n, freq='D'),
+            'Producto': np.random.choice(['Laptop', 'Smartphone', 'Tablet', 'Monitor', 'Teclado', 'Mouse'], n),
+            'Categoría': np.random.choice(['Electrónica', 'Computación', 'Accesorios'], n),
+            'Ventas': np.random.uniform(100, 2000, n).round(2),
+            'Cantidad': np.random.randint(1, 10, n),
+            'Cliente': np.random.choice(['Empresa A', 'Empresa B', 'Empresa C', 'Empresa D', 'Particular'], n),
+            'Región': np.random.choice(['Norte', 'Sur', 'Este', 'Oeste', 'Centro'], n)
         })
         
         session_id = secrets.token_hex(8)
-        cols = detectar_columnas(df)
-        metrics = calcular_metricas(df, cols)
+        cols_detectadas = detectar_columnas_ventas(df)
         
         sessions[session_id] = {
             'df': df,
-            'filename': 'ejemplo_ventas.csv',
-            'cols': cols,
-            'metrics': metrics,
-            'rows': len(df)
+            'filename': 'datos_ejemplo.csv',
+            'cols_detectadas': cols_detectadas,
+            'metrics': obtener_metricas(df, cols_detectadas),
+            'rows': len(df),
+            'columns': len(df.columns),
+            'nulos': df.isnull().sum().sum()
         }
         
         return redirect(f'/dashboard/{session_id}/resumen')
+        
     except Exception as e:
-        print(f"Error sample: {e}")
-        traceback.print_exc()
-        flash(f'Error: {str(e)}')
+        flash(f'Error: {str(e)}', 'error')
         return redirect(url_for('main'))
 
 @app.route('/upload', methods=['POST'])
 def upload():
+    if 'file' not in request.files:
+        flash('No se seleccionó ningún archivo', 'error')
+        return redirect(url_for('main'))
+    
+    file = request.files['file']
+    if file.filename == '':
+        flash('Nombre de archivo vacío', 'error')
+        return redirect(url_for('main'))
+    
     try:
-        if 'file' not in request.files:
-            flash('No hay archivo')
-            return redirect(url_for('main'))
-        
-        file = request.files['file']
-        if file.filename == '':
-            flash('Archivo vacío')
-            return redirect(url_for('main'))
-        
         # Leer archivo
-        if file.filename.endswith('.csv'):
+        if file.filename.lower().endswith('.csv'):
             df = pd.read_csv(file)
-        elif file.filename.endswith(('.xlsx', '.xls')):
+        elif file.filename.lower().endswith(('.xlsx', '.xls')):
             df = pd.read_excel(file)
+        elif file.filename.lower().endswith('.json'):
+            df = pd.read_json(file)
         else:
-            flash('Formato no soportado. Usa CSV o Excel')
+            flash('Formato no soportado. Usa CSV, Excel o JSON', 'error')
             return redirect(url_for('main'))
         
-        # Limpiar columnas
+        # Validar
+        if len(df) == 0:
+            flash('El archivo está vacío', 'error')
+            return redirect(url_for('main'))
+        
+        # Limpiar nombres de columnas
         df.columns = [str(col).strip() for col in df.columns]
         
-        # Detectar columnas y calcular métricas
-        cols = detectar_columnas(df)
-        metrics = calcular_metricas(df, cols)
+        # Detectar columnas
+        cols_detectadas = detectar_columnas_ventas(df)
         
         # Crear sesión
         session_id = secrets.token_hex(8)
         sessions[session_id] = {
             'df': df,
             'filename': file.filename,
-            'cols': cols,
-            'metrics': metrics,
-            'rows': len(df)
+            'cols_detectadas': cols_detectadas,
+            'metrics': obtener_metricas(df, cols_detectadas),
+            'rows': len(df),
+            'columns': len(df.columns),
+            'nulos': df.isnull().sum().sum()
         }
         
         return redirect(f'/dashboard/{session_id}/resumen')
         
     except Exception as e:
-        print(f"Error upload: {e}")
-        traceback.print_exc()
-        flash(f'Error: {str(e)}')
+        flash(f'Error al procesar el archivo: {str(e)}', 'error')
         return redirect(url_for('main'))
 
 @app.route('/dashboard/<session_id>/<viz_type>')
@@ -591,54 +831,51 @@ def dashboard(session_id, viz_type):
     
     session_data = sessions[session_id]
     df = session_data['df']
-    cols = session_data['cols']
+    cols_detectadas = session_data['cols_detectadas']
     
-    # Generar visualización
+    # Generar visualización según tipo
+    viz_content = ''
+    viz_title = ''
+    
     if viz_type == 'resumen':
+        fig = generar_dashboard_resumen(df, cols_detectadas)
         viz_title = '📊 Dashboard Resumen'
-        # Mostrar tabla y métricas
-        viz_content = f'''
-        <div style="margin-bottom: 30px;">
-            <h3>Vista previa de datos</h3>
-            <div class="table-wrapper">
-                {df.head(10).to_html(index=False)}
-            </div>
-        </div>
-        '''
-        # Intentar agregar gráficos si existen
-        fig1 = grafico_top_productos(df, cols)
-        fig2 = grafico_ventas_region(df, cols)
-        
-        if fig1 or fig2:
-            viz_content += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">'
-            if fig1:
-                viz_content += f'<div>{fig1}</div>'
-            if fig2:
-                viz_content += f'<div>{fig2}</div>'
-            viz_content += '</div>'
-    
     elif viz_type == 'ventas_tiempo':
-        viz_title = '📈 Ventas por Tiempo'
-        fig = grafico_ventas_tiempo(df, cols)
-        viz_content = fig if fig else '<p style="color: #666; text-align: center;">No hay datos de fecha o ventas</p>'
-    
+        fig = generar_grafico_ventas_tiempo(df, cols_detectadas)
+        viz_title = '📈 Evolución de Ventas'
     elif viz_type == 'top_productos':
+        fig = generar_grafico_top_productos(df, cols_detectadas)
         viz_title = '🏆 Top Productos'
-        fig = grafico_top_productos(df, cols)
-        viz_content = fig if fig else '<p style="color: #666; text-align: center;">No hay datos de productos o ventas</p>'
-    
+    elif viz_type == 'ventas_categoria':
+        fig = generar_grafico_top_productos(df, cols_detectadas)  # Reutilizamos
+        viz_title = '📦 Ventas por Producto'
     elif viz_type == 'ventas_region':
+        fig = generar_grafico_ventas_region(df, cols_detectadas)
         viz_title = '🌍 Ventas por Región'
-        fig = grafico_ventas_region(df, cols)
-        viz_content = fig if fig else '<p style="color: #666; text-align: center;">No hay datos de región o ventas</p>'
-    
-    else:  # datos
-        viz_title = '📋 Todos los Datos'
+    elif viz_type == 'clientes':
+        fig = generar_grafico_top_clientes(df, cols_detectadas)
+        viz_title = '👥 Top Clientes'
+    elif viz_type == 'datos':
+        viz_title = '📋 Vista de Datos'
         viz_content = f'''
         <div class="table-wrapper">
-            {df.to_html(index=False)}
+            {df.head(50).to_html(classes='table', border=0, index=False)}
         </div>
+        <p style="text-align: center; margin-top: 20px; color: #666;">
+            Mostrando 50 de {len(df)} registros
+        </p>
         '''
+    
+    if viz_type != 'datos':
+        if fig:
+            viz_content = fig.to_html(full_html=False, include_plotlyjs=False)
+        else:
+            viz_content = '''
+            <div style="text-align: center; padding: 50px;">
+                <h3 style="color: #666;">📊 No hay datos suficientes para esta visualización</h3>
+                <p style="color: #999;">El archivo no contiene las columnas necesarias</p>
+            </div>
+            '''
     
     return render_template_string(
         DASHBOARD_HTML,
@@ -653,15 +890,14 @@ def dashboard(session_id, viz_type):
     )
 
 # ============================================
-# EJECUTAR
+# INICIAR APLICACIÓN
 # ============================================
 if __name__ == '__main__':
     print("="*60)
-    print("📊 SALES ANALYTICS - CON GRÁFICAS ACTIVADAS")
+    print("📊 SALES ANALYTICS PRO - VERSIÓN CORREGIDA")
     print("="*60)
     print("🚀 Servidor: http://localhost:5000")
-    print("📁 Datos ejemplo: http://localhost:5000/sample")
-    print("📈 Gráficas: Plotly activado")
+    print("📁 Datos de ejemplo: http://localhost:5000/sample")
     print("="*60)
     
     import webbrowser
