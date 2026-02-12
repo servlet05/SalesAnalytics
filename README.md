@@ -7,7 +7,6 @@
 
 **Sales Analytics Pro** es una aplicación web profesional para el análisis inteligente de datos de ventas. Detecta automáticamente columnas de ventas, productos, clientes, regiones y más, generando visualizaciones interactivas sin necesidad de configuración.
 
-![Dashboard Preview](docs/screenshots/dashboard.png)
 
 ## ✨ Características
 
@@ -46,8 +45,8 @@
 
 ```bash
 # Clonar el repositorio
-git clone https://github.com/tuusuario/sales-analytics-pro.git
-cd sales-analytics-pro
+git clone https://github.com/servlet05/SalesAnalytics.git
+cd sales-analytics
 
 # Crear entorno virtual
 python -m venv venv
