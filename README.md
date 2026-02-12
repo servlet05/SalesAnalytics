@@ -44,21 +44,33 @@
 ### Opción 1: Clonar repositorio
 
 ```bash
-# Clonar el repositorio
+# ============================================
+# INSTALACIÓN COMPLETA - SOLO COPIA Y PEGA
+# ============================================
+
+# 1. Clonar y entrar
 git clone https://github.com/servlet05/SalesAnalytics.git
-cd sales-analytics
+cd SalesAnalytics
 
-# Crear entorno virtual
-python -m venv venv
+# 2. Verificar Python
+if ! command -v python3 &> /dev/null; then
+    echo "Instalando Python 3..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    brew install python3
+fi
 
-# Activar entorno virtual
-# Windows:
-venv\Scripts\activate
-# Mac/Linux:
+# 3. Crear y activar entorno virtual
+python3 -m venv venv
 source venv/bin/activate
 
-# Instalar dependencias
-pip install -r requirements.txt
+# 4. Actualizar pip
+pip install --upgrade pip
 
-# Ejecutar aplicación
-python app.py
+# 5. Instalar dependencias
+pip install flask pandas plotly openpyxl xlrd numpy python-dateutil
+
+# 6. Crear archivos necesarios si no existen
+mkdir -p templates
+
+# 7. Ejecutar la aplicación
+python3 app.py
